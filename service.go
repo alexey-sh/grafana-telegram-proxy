@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 )
 
@@ -20,14 +20,21 @@ func (t *TelegramSender) SendTelegramMessage(message string) ([]byte, error) {
 
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage?parse_mode=html", token)
 	body := new(bytes.Buffer)
-	err := json.NewEncoder(body).Encode(Message{chatId, message})
-	if err != nil {
+	if err := json.NewEncoder(body).Encode(Message{chatId, message}); err != nil {
 		return nil, err
 	}
 	resp, err := http.Post(url, "application/json; charset=utf-8", body)
 	if err != nil {
 		return nil, err
 	}
-	text, _ := ioutil.ReadAll(resp.Body)
-	return text, err
+	defer resp.Body.Close()
+
+	text, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return text, fmt.Errorf("telegram API %d: %s", resp.StatusCode, string(text))
+	}
+	return text, nil
 }
