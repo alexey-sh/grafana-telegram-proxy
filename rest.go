@@ -8,9 +8,12 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/op/go-logging"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 var log = logging.MustGetLogger("grafana-telegram-proxy")
@@ -25,14 +28,35 @@ type RestController struct {
 }
 
 func (this *RestController) Start() {
-	http.HandleFunc("/health", this.HealthHandler)
+	http.Handle("/metrics", promhttp.Handler())
+	http.HandleFunc("/health", instrument("health", this.HealthHandler))
 	if useAuth() {
-		http.HandleFunc("/", basicAuth(this.WebhookHandler))
+		http.HandleFunc("/", instrument("webhook", basicAuth(this.WebhookHandler)))
 	} else {
-		http.HandleFunc("/", this.WebhookHandler)
+		http.HandleFunc("/", instrument("webhook", this.WebhookHandler))
 	}
 	fmt.Println("Starting server on port:", strings.Split(getPort(), ":")[1])
 	log.Fatal(http.ListenAndServe(getPort(), nil))
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
+func instrument(name string, h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		start := time.Now()
+		h(rec, r)
+		httpRequestDuration.WithLabelValues(name).Observe(time.Since(start).Seconds())
+		httpRequests.WithLabelValues(name, r.Method, strconv.Itoa(rec.status)).Inc()
+	}
 }
 
 func useAuth() bool {

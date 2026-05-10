@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -178,4 +180,57 @@ func TestFormatMessage_OverLimitTruncation(t *testing.T) {
 	out := formatMessage(Request{Status: "firing", Alerts: alerts})
 	assert.Contains(t, out, "(2 more truncated)")
 	assert.Equal(t, 10, strings.Count(out, "[FIRING]"))
+}
+
+func TestMetricsEndpoint(t *testing.T) {
+	rr := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/metrics", nil)
+	promhttp.Handler().ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Contains(t, rr.Header().Get("Content-Type"), "text/plain")
+	body := rr.Body.String()
+	for _, name := range []string{
+		"http_requests_total",
+		"http_request_duration_seconds",
+		"telegram_send_total",
+		"telegram_send_duration_seconds",
+		"service_info",
+		"go_goroutines",
+		"process_start_time_seconds",
+	} {
+		assert.Contains(t, body, name)
+	}
+}
+
+func TestInstrument_RecordsRequestCounter(t *testing.T) {
+	before := testutil.ToFloat64(httpRequests.WithLabelValues("test", "GET", "200"))
+
+	noop := func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}
+	wrapped := instrument("test", noop)
+
+	rr := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/anything", nil)
+	wrapped(rr, req)
+
+	after := testutil.ToFloat64(httpRequests.WithLabelValues("test", "GET", "200"))
+	assert.Equal(t, before+1, after)
+}
+
+func TestInstrument_DefaultsTo200WhenWriteHeaderNotCalled(t *testing.T) {
+	before := testutil.ToFloat64(httpRequests.WithLabelValues("implicit", "GET", "200"))
+
+	noWriteHeader := func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("ok"))
+	}
+	wrapped := instrument("implicit", noWriteHeader)
+
+	rr := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/anything", nil)
+	wrapped(rr, req)
+
+	after := testutil.ToFloat64(httpRequests.WithLabelValues("implicit", "GET", "200"))
+	assert.Equal(t, before+1, after)
 }

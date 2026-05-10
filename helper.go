@@ -19,9 +19,7 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
-type handler func(w http.ResponseWriter, r *http.Request)
-
-func basicAuth(pass handler) handler {
+func basicAuth(pass http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		auth := strings.SplitN(r.Header.Get("Authorization"), " ", 2)
 
