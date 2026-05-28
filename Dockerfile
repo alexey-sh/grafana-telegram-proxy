@@ -2,7 +2,7 @@ FROM golang:1.26-bookworm AS builder
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
-COPY helper.go main.go model.go rest.go service.go ./
+COPY helper.go main.go metrics.go model.go rest.go service.go ./
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/grafana-telegram-proxy
 
 FROM scratch
